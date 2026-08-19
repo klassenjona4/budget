@@ -49,9 +49,23 @@ The app is a static folder. Copy `dist` to any static host that serves over
 HTTPS. HTTPS is required: WebAuthn, service workers and persistent storage all
 need a secure context.
 
-For a GitHub Pages project site at `https://<user>.github.io/budget/`, build
-with the default base path and publish `dist` to the `gh-pages` branch. For a
-user site at the domain root, build with `BASE_PATH=/`.
+### GitHub Pages
+
+This repository deploys itself. `.github/workflows/deploy.yml` builds on every
+push to `main` and publishes the result, working out the base path from the
+repository name, so a project site and a user site both come out correct.
+
+Pages has to be switched on once by an account owner, because the token a
+workflow runs with cannot create the Pages site itself:
+
+```
+gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow
+```
+
+The equivalent in the browser is Settings, Pages, Source, GitHub Actions. After
+that every push deploys on its own.
+
+This app is live at https://klassenjona4.github.io/budget/.
 
 Navigation uses the URL hash, so no server rewrite rules are needed.
 
