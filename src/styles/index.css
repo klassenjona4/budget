@@ -69,6 +69,9 @@
   --safe-right: env(safe-area-inset-right, 0px);
 
   --tabbar-height: 64px;
+  --chart-height: 132px;
+  --donut-size: 120px;
+  --daybar-height: 72px;
 }
 
 *,
@@ -434,6 +437,114 @@ ul {
 
 .progress--over > span {
   background: var(--colour-negative);
+}
+
+/* Charts */
+
+.chart {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.chart-svg {
+  display: block;
+  width: 100%;
+  height: var(--chart-height);
+  overflow: visible;
+}
+
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--text-xs);
+  color: var(--colour-text-faint);
+}
+
+.donut-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.donut {
+  width: var(--donut-size);
+  height: var(--donut-size);
+  flex: none;
+}
+
+.legend {
+  flex: 1;
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.legend li > .with-swatch {
+  overflow: hidden;
+}
+
+.legend li > .with-swatch > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.day-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: var(--daybar-height);
+}
+
+.day-bars__col {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+/* A day with no spending keeps a two pixel stub, which reads as the baseline. */
+.day-bars__fill {
+  width: 100%;
+  background: var(--colour-accent);
+  border-radius: 2px;
+  min-height: 2px;
+}
+
+.bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+}
+
+/* The marker shows where the target says spending should be by today. */
+.pace {
+  position: relative;
+  overflow: visible;
+}
+
+.pace__marker {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--colour-text);
+  border-radius: var(--radius-pill);
 }
 
 /* Lists */

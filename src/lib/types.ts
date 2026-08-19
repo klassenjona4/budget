@@ -7,10 +7,11 @@ export type Category = {
   type: "category";
   name: string;
   kind: CategoryKind;
-  monthlyPlanCents: number;
   colour: string; // hex, chosen from a fixed palette
   archived: boolean;
   sortIndex: number;
+  /** Reserved categories cannot be renamed or archived by hand. */
+  system?: "correction";
 };
 
 export type Transaction = {
@@ -21,6 +22,40 @@ export type Transaction = {
   categoryId: string;
   note: string;
   createdAt: string; // ISO timestamp
+  /** Balance corrections move the balance but are not spending. */
+  kind?: "adjustment";
+  /** Set when the row was posted automatically by a recurring payment. */
+  recurrenceId?: string;
+};
+
+export type RecurrenceInterval = "weekly" | "monthly" | "yearly";
+
+export type Recurrence = {
+  id: string;
+  type: "recurrence";
+  name: string;
+  amountCents: number; // negative expense, positive income
+  categoryId: string;
+  interval: RecurrenceInterval;
+  /** 1 to 28 for monthly and yearly. */
+  dayOfMonth: number;
+  /** 0 is Sunday, used by the weekly interval only. */
+  weekday: number;
+  /** 1 to 12, used by the yearly interval only. */
+  month: number;
+  startDate: string; // ISO date, first date it may post
+  endDate: string | null;
+  /** Last date already posted, so a restart cannot double post. */
+  lastPostedDate: string | null;
+  active: boolean;
+};
+
+export type NotificationSettings = {
+  enabled: boolean;
+  /** Local hour, 0 to 23. */
+  morningHour: number;
+  eveningHour: number;
+  paceAlerts: boolean;
 };
 
 export type Settings = {
@@ -31,13 +66,29 @@ export type Settings = {
   autoLockSeconds: number;
   lockOnBackground: boolean;
   wipeAfterFailures: boolean;
-  lastExportAt: string | null; // ISO timestamp of the last encrypted backup
+  lastExportAt: string | null;
   storagePersisted: boolean;
+  /** Balance at openingBalanceDate, everything after it is derived. */
+  openingBalanceCents: number;
+  openingBalanceDate: string;
+  /** One target for the whole month, in cents. Zero means no target. */
+  monthlyTargetCents: number;
+  notifications: NotificationSettings;
+  /** ISO dates of the last starter and recap that were shown. */
+  lastMorningNotice: string | null;
+  lastEveningNotice: string | null;
 };
 
-export type BudgetRecord = Category | Transaction | Settings;
+export type BudgetRecord = Category | Transaction | Settings | Recurrence;
 
 export type RecordType = BudgetRecord["type"];
+
+export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
+  enabled: false,
+  morningHour: 6,
+  eveningHour: 21,
+  paceAlerts: true,
+};
 
 export const DEFAULT_SETTINGS: Settings = {
   id: "settings",
@@ -49,6 +100,12 @@ export const DEFAULT_SETTINGS: Settings = {
   wipeAfterFailures: false,
   lastExportAt: null,
   storagePersisted: false,
+  openingBalanceCents: 0,
+  openingBalanceDate: "1970-01-01",
+  monthlyTargetCents: 0,
+  notifications: DEFAULT_NOTIFICATIONS,
+  lastMorningNotice: null,
+  lastEveningNotice: null,
 };
 
 /** Fixed palette. Categories may only use one of these values. */
@@ -64,9 +121,11 @@ export const PALETTE = [
   "#8A93B5",
 ] as const;
 
+export const CORRECTION_CATEGORY_NAME = "Balance correction";
+
 type SeedCategory = { name: string; kind: CategoryKind };
 
-/** Seed categories created once during setup, every plan starts at 0 cents. */
+/** Seed categories created once during setup. */
 export const SEED_CATEGORIES: readonly SeedCategory[] = [
   { name: "Rent", kind: "fixed" },
   { name: "Utilities", kind: "fixed" },
@@ -80,5 +139,6 @@ export const SEED_CATEGORIES: readonly SeedCategory[] = [
   { name: "Health", kind: "variable" },
   { name: "Clothing", kind: "variable" },
   { name: "Savings", kind: "variable" },
+  { name: "Income", kind: "variable" },
   { name: "Other", kind: "variable" },
 ];

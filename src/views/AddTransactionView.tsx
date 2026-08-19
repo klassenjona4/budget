@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Keypad } from "../components/Keypad.tsx";
-import { recentCategoryIds } from "../lib/budget.ts";
+import { recentCategoryIds } from "../lib/insights.ts";
 import { digitsToCents, formatDigits } from "../lib/money.ts";
 import { today } from "../lib/period.ts";
 import { useActions, useStoreState } from "../state/store.tsx";
@@ -59,7 +59,7 @@ export function AddTransactionView({ onNavigate }: { onNavigate: (route: Route) 
         setSaved(true);
         window.setTimeout(() => setSaved(false), 2000);
       } else {
-        onNavigate("overview");
+        onNavigate("home");
       }
     } finally {
       setBusy(false);

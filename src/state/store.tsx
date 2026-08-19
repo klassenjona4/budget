@@ -26,7 +26,12 @@ import {
   downloadBlob,
   readEncryptedBackup,
 } from "../lib/backup.ts";
+import { currentBalance } from "../lib/balance.ts";
+import { summariseMonth } from "../lib/insights.ts";
+import { pendingPosts, postsFor } from "../lib/recurrence.ts";
+import { currentPeriod, today } from "../lib/period.ts";
 import {
+  correctionCategory,
   loadAll,
   removeRecord,
   replaceAll,
@@ -34,6 +39,7 @@ import {
   saveRecords,
   seedInitialData,
   sortCategories,
+  sortRecurrences,
   sortTransactions,
   type VaultData,
 } from "../lib/records.ts";
@@ -50,8 +56,21 @@ import {
   wipeAll as vaultWipeAll,
   type BiometricMode,
 } from "../lib/vault.ts";
+import {
+  disableDailyWakeups,
+  enableDailyWakeups,
+  notify,
+  requestPermission,
+} from "../lib/notifications.ts";
 import { DEFAULT_SETTINGS, PALETTE } from "../lib/types.ts";
-import type { Category, CategoryKind, Settings, Transaction } from "../lib/types.ts";
+import type {
+  Category,
+  CategoryKind,
+  NotificationSettings,
+  Recurrence,
+  Settings,
+  Transaction,
+} from "../lib/types.ts";
 
 export type Status = "loading" | "setup" | "locked" | "unlocked";
 
@@ -65,11 +84,14 @@ export type NewTransaction = {
 export type NewCategory = {
   name: string;
   kind: CategoryKind;
-  monthlyPlanCents: number;
   colour: string;
 };
 
+export type NewRecurrence = Omit<Recurrence, "id" | "type" | "lastPostedDate">;
+
 export type ImportMode = "replace" | "merge";
+
+export type NoticeKind = "morning" | "evening";
 
 export type StoreState = {
   status: Status;
@@ -77,8 +99,11 @@ export type StoreState = {
   biometricAvailable: boolean;
   categories: Category[];
   transactions: Transaction[];
+  recurrences: Recurrence[];
   settings: Settings;
   damaged: number;
+  /** Rows posted by recurring payments during this unlock. */
+  postedThisSession: number;
 };
 
 export type StoreActions = {
@@ -89,10 +114,16 @@ export type StoreActions = {
   addTransaction: (input: NewTransaction) => Promise<void>;
   updateTransaction: (transaction: Transaction) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
+  correctBalance: (actualCents: number) => Promise<void>;
   addCategory: (input: NewCategory) => Promise<void>;
   updateCategory: (category: Category) => Promise<void>;
   reorderCategories: (orderedIds: string[]) => Promise<void>;
+  addRecurrence: (input: NewRecurrence) => Promise<void>;
+  updateRecurrence: (recurrence: Recurrence) => Promise<void>;
+  deleteRecurrence: (id: string) => Promise<void>;
   updateSettings: (patch: Partial<Settings>) => Promise<void>;
+  updateNotifications: (patch: Partial<NotificationSettings>) => Promise<NotificationPermission>;
+  markNoticeShown: (kind: NoticeKind) => Promise<void>;
   changePin: (oldPin: string, newPin: string) => Promise<void>;
   enrolBiometric: (pin: string) => Promise<BiometricMode>;
   removeBiometric: () => Promise<void>;
@@ -101,7 +132,6 @@ export type StoreActions = {
   importBackup: (text: string, passphrase: string, mode: ImportMode) => Promise<number>;
   requestPersist: () => Promise<boolean>;
   wipeAll: () => Promise<void>;
-  /** Returns the app to first run state after the vault was destroyed. */
   resetToSetup: () => void;
 };
 
@@ -111,6 +141,7 @@ const ActionsContext = createContext<StoreActions | null>(null);
 const EMPTY: VaultData = {
   categories: [],
   transactions: [],
+  recurrences: [],
   settings: DEFAULT_SETTINGS,
   damaged: 0,
 };
@@ -120,6 +151,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [biometric, setBiometric] = useState<BiometricMode | null>(null);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [data, setDataState] = useState<VaultData>(EMPTY);
+  const [postedThisSession, setPostedThisSession] = useState(0);
   const dataRef = useRef<VaultData>(EMPTY);
   const dekRef = useRef<CryptoKey | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
@@ -154,25 +186,57 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const lock = useCallback(() => {
     dekRef.current = null;
     setData(EMPTY);
+    setPostedThisSession(0);
     setStatus((current) => (current === "setup" ? current : "locked"));
   }, [setData]);
+
+  /**
+   * Posts every recurring payment that fell due while the app was closed.
+   * Each recurrence records the last date it posted, so this is safe to run
+   * on every unlock.
+   */
+  const postDue = useCallback(async (key: CryptoKey, loaded: VaultData): Promise<VaultData> => {
+    const todayIso = today();
+    const pending = pendingPosts(loaded.recurrences, todayIso);
+    if (pending.length === 0) return loaded;
+
+    const transactions: Transaction[] = [];
+    const recurrences = [...loaded.recurrences];
+    for (const item of pending) {
+      transactions.push(...postsFor(item.recurrence, item.dates, newId));
+      const index = recurrences.findIndex((row) => row.id === item.recurrence.id);
+      const lastDate = item.dates[item.dates.length - 1];
+      if (index >= 0 && lastDate) {
+        recurrences[index] = { ...item.recurrence, lastPostedDate: lastDate };
+      }
+    }
+
+    await saveRecords(key, [...transactions, ...recurrences.filter((row) => row.active)]);
+    setPostedThisSession(transactions.length);
+    return {
+      ...loaded,
+      transactions: sortTransactions([...loaded.transactions, ...transactions]),
+      recurrences: sortRecurrences(recurrences),
+    };
+  }, []);
 
   /** Runs after a successful unlock: keeps the DEK, then asks for persistence. */
   const afterUnlock = useCallback(
     async (key: CryptoKey, loaded: VaultData) => {
+      const withPosts = await postDue(key, loaded);
       dekRef.current = key;
       lastActivityRef.current = Date.now();
-      setData(loaded);
+      setData(withPosts);
       setStatus("unlocked");
 
       const persisted = (await isStoragePersisted()) || (await requestPersistentStorage());
-      if (persisted !== loaded.settings.storagePersisted) {
+      if (persisted !== withPosts.settings.storagePersisted) {
         const settings: Settings = { ...dataRef.current.settings, storagePersisted: persisted };
         await saveRecord(key, settings);
         setData((current) => ({ ...current, settings }));
       }
     },
-    [setData],
+    [postDue, setData],
   );
 
   const setup = useCallback(
@@ -197,8 +261,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     await afterUnlock(session.dek, await loadAll(session.dek));
   }, [afterUnlock]);
 
+  /**
+   * Fires once, on the entry that tips the month past the pace the target
+   * allows. The body carries no figures, because the notification may sit on
+   * a lock screen.
+   */
+  const alertIfOverPace = useCallback(async (before: VaultData, after: VaultData) => {
+    const settings = after.settings;
+    if (!settings.notifications.enabled || !settings.notifications.paceAlerts) return;
+    if (settings.monthlyTargetCents <= 0) return;
+    const period = currentPeriod(settings.monthStartDay);
+    const was = summariseMonth(before.categories, before.transactions, period, settings);
+    const now = summariseMonth(after.categories, after.transactions, period, settings);
+    if (was.status !== "over" && now.status === "over") {
+      await notify(
+        "Budget",
+        "Spending has moved ahead of the pace your monthly target allows. Open the app for the figures.",
+        "pace-alert",
+      );
+    }
+  }, []);
+
   const addTransaction = useCallback(
     async (input: NewTransaction) => {
+      const before = dataRef.current;
       const transaction: Transaction = {
         id: newId(),
         type: "transaction",
@@ -213,8 +299,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...current,
         transactions: sortTransactions([...current.transactions, transaction]),
       }));
+      await alertIfOverPace(before, dataRef.current);
     },
-    [dek, setData],
+    [alertIfOverPace, dek, setData],
   );
 
   const updateTransaction = useCallback(
@@ -241,6 +328,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [setData],
   );
 
+  /**
+   * Books the difference between the ledger and the real account as an
+   * adjustment, so the balance line matches the bank without rewriting history.
+   */
+  const correctBalance = useCallback(
+    async (actualCents: number) => {
+      const current = dataRef.current;
+      const todayIso = today();
+      const difference = actualCents - currentBalance(current.settings, current.transactions, todayIso);
+      if (difference === 0) return;
+      const category = correctionCategory(current.categories);
+      if (!category) throw new Error("The balance correction category is missing.");
+      const transaction: Transaction = {
+        id: newId(),
+        type: "transaction",
+        date: todayIso,
+        amountCents: difference,
+        categoryId: category.id,
+        note: "Balance corrected to the actual account",
+        createdAt: new Date().toISOString(),
+        kind: "adjustment",
+      };
+      await saveRecord(dek(), transaction);
+      setData((state) => ({
+        ...state,
+        transactions: sortTransactions([...state.transactions, transaction]),
+      }));
+    },
+    [dek, setData],
+  );
+
   const addCategory = useCallback(
     async (input: NewCategory) => {
       const category: Category = {
@@ -248,7 +366,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         type: "category",
         name: input.name,
         kind: input.kind,
-        monthlyPlanCents: input.monthlyPlanCents,
         colour: input.colour || PALETTE[0],
         archived: false,
         sortIndex: dataRef.current.categories.length,
@@ -288,6 +405,44 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [dek, setData],
   );
 
+  const addRecurrence = useCallback(
+    async (input: NewRecurrence) => {
+      const recurrence: Recurrence = { ...input, id: newId(), type: "recurrence", lastPostedDate: null };
+      const key = dek();
+      await saveRecord(key, recurrence);
+      const withPosts = await postDue(key, {
+        ...dataRef.current,
+        recurrences: sortRecurrences([...dataRef.current.recurrences, recurrence]),
+      });
+      setData(withPosts);
+    },
+    [dek, postDue, setData],
+  );
+
+  const updateRecurrence = useCallback(
+    async (recurrence: Recurrence) => {
+      await saveRecord(dek(), recurrence);
+      setData((current) => ({
+        ...current,
+        recurrences: sortRecurrences(
+          current.recurrences.map((row) => (row.id === recurrence.id ? recurrence : row)),
+        ),
+      }));
+    },
+    [dek, setData],
+  );
+
+  const deleteRecurrence = useCallback(
+    async (id: string) => {
+      await removeRecord(id);
+      setData((current) => ({
+        ...current,
+        recurrences: current.recurrences.filter((row) => row.id !== id),
+      }));
+    },
+    [setData],
+  );
+
   const updateSettings = useCallback(
     async (patch: Partial<Settings>) => {
       const settings: Settings = {
@@ -302,6 +457,46 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       setData((current) => ({ ...current, settings }));
       lastActivityRef.current = Date.now();
+    },
+    [dek, setData],
+  );
+
+  /**
+   * Turning notifications on asks for permission and registers the background
+   * wake up. Both can fail without stopping the setting from being saved,
+   * because the in-app cards work either way.
+   */
+  const updateNotifications = useCallback(
+    async (patch: Partial<NotificationSettings>): Promise<NotificationPermission> => {
+      const next: NotificationSettings = { ...dataRef.current.settings.notifications, ...patch };
+      let permission: NotificationPermission =
+        typeof Notification === "undefined" ? "denied" : Notification.permission;
+
+      if (next.enabled) {
+        if (permission === "default") permission = await requestPermission();
+        if (permission === "granted") await enableDailyWakeups();
+        else next.enabled = false;
+      } else {
+        await disableDailyWakeups();
+      }
+
+      const settings: Settings = { ...dataRef.current.settings, notifications: next };
+      await saveRecord(dek(), settings);
+      setData((current) => ({ ...current, settings }));
+      return permission;
+    },
+    [dek, setData],
+  );
+
+  const markNoticeShown = useCallback(
+    async (kind: NoticeKind) => {
+      const stamp = today();
+      const settings: Settings = {
+        ...dataRef.current.settings,
+        ...(kind === "morning" ? { lastMorningNotice: stamp } : { lastEveningNotice: stamp }),
+      };
+      await saveRecord(dek(), settings);
+      setData((current) => ({ ...current, settings }));
     },
     [dek, setData],
   );
@@ -324,7 +519,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const exportBackup = useCallback(
     async (passphrase: string) => {
       const current = dataRef.current;
-      const records = [current.settings, ...current.categories, ...current.transactions];
+      const records = [
+        current.settings,
+        ...current.categories,
+        ...current.recurrences,
+        ...current.transactions,
+      ];
       const { filename, blob } = await createEncryptedBackup(records, passphrase);
       downloadBlob(blob, filename);
       const settings: Settings = { ...current.settings, lastExportAt: new Date().toISOString() };
@@ -412,10 +612,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       biometricAvailable,
       categories: data.categories,
       transactions: data.transactions,
+      recurrences: data.recurrences,
       settings: data.settings,
       damaged: data.damaged,
+      postedThisSession,
     }),
-    [biometric, biometricAvailable, data, status],
+    [biometric, biometricAvailable, data, postedThisSession, status],
   );
 
   const actions = useMemo<StoreActions>(
@@ -427,10 +629,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addTransaction,
       updateTransaction,
       deleteTransaction,
+      correctBalance,
       addCategory,
       updateCategory,
       reorderCategories,
+      addRecurrence,
+      updateRecurrence,
+      deleteRecurrence,
       updateSettings,
+      updateNotifications,
+      markNoticeShown,
       changePin,
       enrolBiometric,
       removeBiometric,
@@ -443,14 +651,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }),
     [
       addCategory,
+      addRecurrence,
       addTransaction,
       changePin,
+      correctBalance,
+      deleteRecurrence,
       deleteTransaction,
       enrolBiometric,
       exportBackup,
       exportCsv,
       importBackup,
       lock,
+      markNoticeShown,
       removeBiometric,
       reorderCategories,
       requestPersist,
@@ -459,6 +671,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       unlockBiometric,
       unlockPin,
       updateCategory,
+      updateNotifications,
+      updateRecurrence,
       updateSettings,
       updateTransaction,
       wipeAll,

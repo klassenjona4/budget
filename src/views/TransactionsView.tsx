@@ -1,6 +1,6 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import { Dialog } from "../components/Dialog.tsx";
-import { groupByDay } from "../lib/budget.ts";
+import { groupByDay } from "../lib/insights.ts";
 import { centsToDecimalString, formatCents, formatCentsSigned, parseDecimalToCents } from "../lib/money.ts";
 import {
   currentPeriod,
@@ -12,13 +12,14 @@ import {
 } from "../lib/period.ts";
 import { useActions, useStoreState } from "../state/store.tsx";
 import type { Transaction } from "../lib/types.ts";
+import type { Route } from "../router.ts";
 
 /** Inline colour only when the category still exists, the CSS carries the fallback. */
 function colourOf(colour: string | undefined): CSSProperties | undefined {
   return colour ? { background: colour } : undefined;
 }
 
-export function TransactionsView() {
+export function TransactionsView({ onNavigate }: { onNavigate: (route: Route) => void }) {
   const store = useStoreState();
   const { locale, monthStartDay } = store.settings;
   const [offset, setOffset] = useState(0);
@@ -52,13 +53,27 @@ export function TransactionsView() {
     <main className="screen">
       <div className="stack">
         <div className="row-between">
-          <button type="button" className="btn" onClick={() => setOffset(offset - 1)}>
-            Back
+          <button type="button" className="btn" onClick={() => onNavigate("home")}>
+            Home
           </button>
-          <h1 className="subtitle">{formatMonthLabel(period, locale)}</h1>
+          <h1 className="subtitle">Transactions</h1>
+          <span />
+        </div>
+
+        <div className="row-between">
           <button
             type="button"
             className="btn"
+            aria-label="Previous period"
+            onClick={() => setOffset(offset - 1)}
+          >
+            Back
+          </button>
+          <span className="num">{formatMonthLabel(period, locale)}</span>
+          <button
+            type="button"
+            className="btn"
+            aria-label="Next period"
             disabled={offset >= 0}
             onClick={() => setOffset(offset + 1)}
           >

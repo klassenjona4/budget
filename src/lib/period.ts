@@ -5,6 +5,7 @@
 import {
   addDays,
   addMonths,
+  addYears,
   differenceInCalendarDays,
   isAfter,
   parseISO,
@@ -12,6 +13,9 @@ import {
   startOfDay,
 } from "date-fns";
 import type { Locale } from "./types.ts";
+
+/** Date arithmetic is re exported so the other modules have one source. */
+export { addDays, addMonths, addYears, differenceInCalendarDays };
 
 export type Period = {
   start: Date;

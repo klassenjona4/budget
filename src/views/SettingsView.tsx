@@ -3,8 +3,11 @@ import { Dialog } from "../components/Dialog.tsx";
 import { PIN_LENGTH, PinEntry } from "../components/PinEntry.tsx";
 import { Switch } from "../components/Switch.tsx";
 import { isStoragePersisted, storageEstimate } from "../lib/db.ts";
+import { centsToDecimalString, formatCents, parseDecimalToCents } from "../lib/money.ts";
+import { dailyWakeupsActive, support, type NotificationSupport } from "../lib/notifications.ts";
 import { useActions, useStoreState, type ImportMode } from "../state/store.tsx";
 import type { Locale } from "../lib/types.ts";
+import type { Route } from "../router.ts";
 
 const GATE_EXPLANATION =
   "Mode: gate. The device did not provide key material, so the encryption key is stored on this device and the biometric check is a lock on the interface rather than on the data. The protection rests on the phone lock screen. The PIN path is unaffected and remains fully encrypted.";
@@ -14,30 +17,195 @@ const PRF_EXPLANATION =
 
 const AUTO_LOCK_CHOICES = [30, 60, 120, 300, 600, 900];
 
-export function SettingsView() {
+const HOURS = Array.from({ length: 24 }, (_, index) => index);
+
+function hourLabel(hour: number): string {
+  return `${`${hour}`.padStart(2, "0")}:00`;
+}
+
+export function SettingsView({ onNavigate }: { onNavigate: (route: Route) => void }) {
   const store = useStoreState();
   const actions = useActions();
   const settings = store.settings;
+  const { locale } = settings;
   const [dialog, setDialog] = useState<
-    "none" | "pin" | "biometric" | "export" | "import" | "wipe"
+    "none" | "pin" | "biometric" | "export" | "import" | "wipe" | "balance" | "target"
   >("none");
   const [persisted, setPersisted] = useState<boolean | null>(null);
   const [usage, setUsage] = useState<string>("");
+  const [notificationSupport, setNotificationSupport] = useState<NotificationSupport | null>(null);
+  const [wakeupsActive, setWakeupsActive] = useState(false);
+  const [notificationNote, setNotificationNote] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
       setPersisted(await isStoragePersisted());
       const estimate = await storageEstimate();
-      if (estimate) {
-        setUsage(`${Math.round(estimate.usage / 1024)} kB used of the browser quota`);
-      }
+      if (estimate) setUsage(`${Math.round(estimate.usage / 1024)} kB used of the browser quota`);
+      setNotificationSupport(await support());
+      setWakeupsActive(await dailyWakeupsActive());
     })();
   }, []);
+
+  async function toggleNotifications(enabled: boolean) {
+    const permission = await actions.updateNotifications({ enabled });
+    setWakeupsActive(await dailyWakeupsActive());
+    setNotificationSupport(await support());
+    if (!enabled) {
+      setNotificationNote(null);
+    } else if (permission === "denied") {
+      setNotificationNote(
+        "The browser refused notification permission. The recap and starter still appear in the app.",
+      );
+    } else if (permission === "granted" && !(await dailyWakeupsActive())) {
+      setNotificationNote(
+        "Notifications are allowed, but this browser will not wake the app in the background. Install the app to the home screen to improve the chances, otherwise the cards wait for you in the app.",
+      );
+    } else {
+      setNotificationNote(null);
+    }
+  }
 
   return (
     <main className="screen">
       <div className="stack">
         <h1 className="title">Settings</h1>
+
+        <section className="card stack">
+          <h2 className="subtitle">Money</h2>
+
+          <div className="row-between">
+            <span className="label">Opening balance</span>
+            <button type="button" className="btn" onClick={() => setDialog("balance")}>
+              {formatCents(settings.openingBalanceCents, locale)}
+            </button>
+          </div>
+          <div className="field">
+            <label className="label" htmlFor="setting-opening-date">
+              Applies from
+            </label>
+            <input
+              id="setting-opening-date"
+              className="input"
+              type="date"
+              value={settings.openingBalanceDate}
+              onChange={(event) =>
+                void actions.updateSettings({
+                  openingBalanceDate: event.target.value || settings.openingBalanceDate,
+                })
+              }
+            />
+          </div>
+          <p className="faint">
+            The balance the app counts from. Transactions on or after this date move it, earlier
+            ones do not, because the opening figure already includes them. There is no bank
+            connection, so the Correct button on the home screen is how you bring it back in line.
+          </p>
+
+          <div className="row-between">
+            <span className="label">Monthly spending target</span>
+            <button type="button" className="btn" onClick={() => setDialog("target")}>
+              {settings.monthlyTargetCents > 0
+                ? formatCents(settings.monthlyTargetCents, locale)
+                : "Not set"}
+            </button>
+          </div>
+          <p className="faint">
+            One figure for the whole period. It drives the pace bar, the daily starter and the
+            alerts.
+          </p>
+        </section>
+
+        <section className="card stack">
+          <h2 className="subtitle">Notifications</h2>
+
+          <Switch
+            label="Daily starter and evening recap"
+            checked={settings.notifications.enabled}
+            onChange={(checked) => void toggleNotifications(checked)}
+          />
+
+          <div className="field">
+            <label className="label" htmlFor="setting-morning">
+              Starter from
+            </label>
+            <select
+              id="setting-morning"
+              className="select num"
+              value={settings.notifications.morningHour}
+              onChange={(event) =>
+                void actions.updateNotifications({ morningHour: Number(event.target.value) })
+              }
+            >
+              {HOURS.map((hour) => (
+                <option key={hour} value={hour}>
+                  {hourLabel(hour)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field">
+            <label className="label" htmlFor="setting-evening">
+              Recap from
+            </label>
+            <select
+              id="setting-evening"
+              className="select num"
+              value={settings.notifications.eveningHour}
+              onChange={(event) =>
+                void actions.updateNotifications({ eveningHour: Number(event.target.value) })
+              }
+            >
+              {HOURS.map((hour) => (
+                <option key={hour} value={hour}>
+                  {hourLabel(hour)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <Switch
+            label="Warn when spending runs ahead of the target"
+            checked={settings.notifications.paceAlerts}
+            onChange={(checked) => void actions.updateNotifications({ paceAlerts: checked })}
+          />
+
+          {notificationNote ? <p className="notice">{notificationNote}</p> : null}
+
+          <p className="faint">
+            The web has no way to schedule a notification for an exact time without a server. With
+            permission granted, Android wakes the app roughly twice a day and delivers a prompt near
+            the times above. The cards themselves always wait for you in the app from the chosen
+            hour onwards, which is the part that never fails.
+          </p>
+          <p className="faint">
+            A background notification carries no figures. The encryption key only exists while the
+            app is unlocked, so the worker that shows the notification cannot read your data. That
+            also means nothing about your money appears on the lock screen.
+          </p>
+          {notificationSupport ? (
+            <p className="faint num">
+              Permission {notificationSupport.permission}, background wake ups{" "}
+              {notificationSupport.periodicSync
+                ? wakeupsActive
+                  ? "registered"
+                  : "available"
+                : "not supported by this browser"}
+              .
+            </p>
+          ) : null}
+        </section>
+
+        <section className="card stack">
+          <h2 className="subtitle">Organise</h2>
+          <button type="button" className="btn btn--block" onClick={() => onNavigate("recurring")}>
+            Recurring payments ({store.recurrences.filter((row) => row.active).length} active)
+          </button>
+          <button type="button" className="btn btn--block" onClick={() => onNavigate("categories")}>
+            Categories ({store.categories.filter((row) => !row.archived).length})
+          </button>
+        </section>
 
         <section className="card stack">
           <h2 className="subtitle">Display</h2>
@@ -206,14 +374,19 @@ export function SettingsView() {
         <section className="card stack">
           <h2 className="subtitle">Data</h2>
           <p className="label num">
-            {store.transactions.length} transactions, {store.categories.length} categories
+            {store.transactions.length} transactions, {store.categories.length} categories,{" "}
+            {store.recurrences.length} recurring
           </p>
           {store.damaged > 0 ? (
             <p className="notice notice--error">
               {store.damaged} records could not be decrypted.
             </p>
           ) : null}
-          <button type="button" className="btn btn--danger btn--block" onClick={() => setDialog("wipe")}>
+          <button
+            type="button"
+            className="btn btn--danger btn--block"
+            onClick={() => setDialog("wipe")}
+          >
             Delete all data
           </button>
         </section>
@@ -223,12 +396,94 @@ export function SettingsView() {
         </p>
       </div>
 
+      {dialog === "balance" ? (
+        <AmountDialog
+          title="Opening balance"
+          description="The figure the ledger starts from. Changing it shifts every balance after the opening date."
+          valueCents={settings.openingBalanceCents}
+          allowNegative
+          onClose={() => setDialog("none")}
+          onSave={(cents) => actions.updateSettings({ openingBalanceCents: cents })}
+        />
+      ) : null}
+      {dialog === "target" ? (
+        <AmountDialog
+          title="Monthly spending target"
+          description="One number for the whole period. Set it to zero to switch the pace bar and the alerts off."
+          valueCents={settings.monthlyTargetCents}
+          onClose={() => setDialog("none")}
+          onSave={(cents) => actions.updateSettings({ monthlyTargetCents: Math.max(0, cents) })}
+        />
+      ) : null}
       {dialog === "pin" ? <ChangePinDialog onClose={() => setDialog("none")} /> : null}
       {dialog === "biometric" ? <EnrolBiometricDialog onClose={() => setDialog("none")} /> : null}
       {dialog === "export" ? <ExportDialog onClose={() => setDialog("none")} /> : null}
       {dialog === "import" ? <ImportDialog onClose={() => setDialog("none")} /> : null}
       {dialog === "wipe" ? <WipeDialog onClose={() => setDialog("none")} /> : null}
     </main>
+  );
+}
+
+function AmountDialog({
+  title,
+  description,
+  valueCents,
+  allowNegative = false,
+  onClose,
+  onSave,
+}: {
+  title: string;
+  description: string;
+  valueCents: number;
+  allowNegative?: boolean;
+  onClose: () => void;
+  onSave: (cents: number) => Promise<void>;
+}) {
+  const [text, setText] = useState<string>(centsToDecimalString(valueCents));
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    const cents = parseDecimalToCents(text);
+    if (cents === null || (!allowNegative && cents < 0)) {
+      setError("Enter an amount such as 1234,56.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await onSave(cents);
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog title={title} onClose={onClose}>
+      <p className="faint">{description}</p>
+      {error ? <p className="notice notice--error">{error}</p> : null}
+      <div className="field">
+        <label className="label" htmlFor="amount-dialog">
+          Amount in EUR
+        </label>
+        <input
+          id="amount-dialog"
+          className="input num"
+          type="text"
+          inputMode="decimal"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+        />
+      </div>
+      <div className="btn-row">
+        <button type="button" className="btn" onClick={onClose} disabled={busy}>
+          Cancel
+        </button>
+        <button type="button" className="btn btn--primary" onClick={() => void save()} disabled={busy}>
+          Save
+        </button>
+      </div>
+    </Dialog>
   );
 }
 

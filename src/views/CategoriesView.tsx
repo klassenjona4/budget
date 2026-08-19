@@ -1,13 +1,12 @@
 import { useMemo, useState } from "react";
 import { Dialog } from "../components/Dialog.tsx";
-import { centsToDecimalString, formatCentsAbs, parseDecimalToCents } from "../lib/money.ts";
 import { useActions, useStoreState } from "../state/store.tsx";
 import { PALETTE, type Category, type CategoryKind } from "../lib/types.ts";
+import type { Route } from "../router.ts";
 
-export function CategoriesView() {
+export function CategoriesView({ onNavigate }: { onNavigate: (route: Route) => void }) {
   const store = useStoreState();
   const actions = useActions();
-  const { locale } = store.settings;
   const [editing, setEditing] = useState<Category | null>(null);
   const [adding, setAdding] = useState(false);
 
@@ -35,7 +34,10 @@ export function CategoriesView() {
     <main className="screen">
       <div className="stack">
         <div className="row-between">
-          <h1 className="title">Categories</h1>
+          <button type="button" className="btn" onClick={() => onNavigate("settings")}>
+            Back
+          </button>
+          <h1 className="subtitle">Categories</h1>
           <button type="button" className="btn btn--primary" onClick={() => setAdding(true)}>
             Add
           </button>
@@ -50,7 +52,6 @@ export function CategoriesView() {
                     <span className="swatch" style={{ background: category.colour }} aria-hidden="true" />
                     <span>{category.name}</span>
                   </span>
-                  <span className="num">{formatCentsAbs(category.monthlyPlanCents, locale)}</span>
                 </div>
                 <div className="row-between spaced">
                   <span className="faint">{category.kind === "fixed" ? "Fixed" : "Variable"}</span>
@@ -117,7 +118,6 @@ function CategoryDialog({ category, onClose }: { category: Category | null; onCl
   const actions = useActions();
   const [name, setName] = useState(category?.name ?? "");
   const [kind, setKind] = useState<CategoryKind>(category?.kind ?? "variable");
-  const [plan, setPlan] = useState<string>(centsToDecimalString(category?.monthlyPlanCents ?? 0));
   const [colour, setColour] = useState(category?.colour ?? PALETTE[0]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -128,11 +128,6 @@ function CategoryDialog({ category, onClose }: { category: Category | null; onCl
       setError("Enter a name.");
       return;
     }
-    const cents = parseDecimalToCents(plan);
-    if (cents === null || cents < 0) {
-      setError("Enter a monthly plan such as 250,00.");
-      return;
-    }
     setBusy(true);
     try {
       if (category) {
@@ -140,11 +135,10 @@ function CategoryDialog({ category, onClose }: { category: Category | null; onCl
           ...category,
           name: trimmed,
           kind,
-          monthlyPlanCents: cents,
           colour,
         });
       } else {
-        await actions.addCategory({ name: trimmed, kind, monthlyPlanCents: cents, colour });
+        await actions.addCategory({ name: trimmed, kind, colour });
       }
       onClose();
     } finally {
@@ -178,20 +172,6 @@ function CategoryDialog({ category, onClose }: { category: Category | null; onCl
           value={name}
           maxLength={40}
           onChange={(event) => setName(event.target.value)}
-        />
-      </div>
-
-      <div className="field">
-        <label className="label" htmlFor="category-plan">
-          Monthly plan in EUR
-        </label>
-        <input
-          id="category-plan"
-          className="input num"
-          type="text"
-          inputMode="decimal"
-          value={plan}
-          onChange={(event) => setPlan(event.target.value)}
         />
       </div>
 

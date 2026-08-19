@@ -24,13 +24,13 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: [
-        "icon.svg",
-        "icon-192.png",
-        "icon-512.png",
-        "icon-maskable-512.png",
-        "apple-touch-icon.png",
-      ],
+      // The worker is hand written so it can handle the daily wake up.
+      // See src/sw.ts. No Workbox runtime ships to the device.
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
+      // No includeAssets: the glob below already covers every icon, and
+      // listing them twice puts duplicate URLs in the precache manifest.
       manifest: {
         name: "Budget",
         short_name: "Budget",
@@ -51,11 +51,8 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
+      injectManifest: {
         globPatterns: ["**/*.{js,css,html,woff2,svg,png}"],
-        navigateFallback: "index.html",
-        // Nothing is fetched at runtime, so there is no runtimeCaching.
-        cleanupOutdatedCaches: true,
       },
     }),
   ],

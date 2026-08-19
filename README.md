@@ -1,12 +1,86 @@
 # Budget
 
-An offline budget tracker that installs to the home screen. All data stays on
-the device, encrypted with AES-GCM 256. There is no backend, no account and no
+An offline account tracker that installs to the home screen. It leads with a
+balance and a thirty day line, not with envelope budgets. All data stays on the
+device, encrypted with AES-GCM 256. There is no backend, no account and no
 network traffic at runtime. After the first install the app works permanently
 in airplane mode.
 
 Currency is EUR. Amounts are formatted with the de-DE locale by default and can
 be switched to en-IE in the settings.
+
+## Screens
+
+Four tabs.
+
+- **Home**: balance today, the last thirty days as a line, this period spent,
+  received and net, pace against the monthly target, the next recurring
+  payments, the daily starter or evening recap when due, and the most recent
+  entries. Full history sits one tap away.
+- **Add**: keypad first, category chips ordered by recent use, date and note.
+- **Review**: one period at a time, with spending split by category as a ring
+  and as ranked bars, spending day by day, and a comparison against the period
+  before.
+- **Settings**: money, notifications, categories, recurring payments, security,
+  backup, storage and data.
+
+## The balance
+
+There is no bank connection. Open Banking needs a regulated provider, a
+backend and a per connection cost, and it is out of scope. The balance is a
+ledger instead:
+
+```
+balance = opening balance + every transaction dated on or after the opening date
+```
+
+Set the opening balance once from what your bank actually says, along with the
+date it was true. Entries dated before that date show up in the review but do
+not move the balance, because the opening figure already includes them. The app
+says so on the home screen when any such entry exists.
+
+When the ledger drifts, Correct on the home screen takes the real balance and
+books the difference as an adjustment, dated today. Adjustments move the
+balance and are left out of the spending charts, so a correction never looks
+like a purchase.
+
+## Recurring payments
+
+A recurring payment is a template, not a transaction. On unlock the app works
+out every date that fell due since the last one it posted and writes them as
+normal transactions carrying the recurrence id, so dates that passed while the
+app was closed are filled in. Posted rows can be edited or deleted like
+anything else, and deleting the recurrence keeps them.
+
+Weekly, monthly and yearly are supported. The day of the month is capped at 28
+so every month has the date. Each recurrence stores the last date it posted,
+which is what makes a restart safe.
+
+## Notifications
+
+Two things arrive daily: a starter in the morning and a recap in the evening,
+at the hours set in Settings.
+
+The web cannot schedule a notification for an exact time without a server, so
+this works in two layers:
+
+- **In the app**: from the chosen hour onwards the card is waiting on the home
+  screen. No permission, no background work, and it never fails.
+- **On the lock screen**: with notification permission granted, Chrome on
+  Android wakes the service worker roughly twice a day through Periodic
+  Background Sync and shows a prompt near those hours. The browser decides the
+  moment from how the app is used, so the timing is approximate and not
+  guaranteed. Installing to the home screen improves it. iOS does not support
+  this at all.
+
+A background notification carries no figures, and this is not a style choice.
+The encryption key exists only in the page while the vault is unlocked, so the
+worker that shows the notification has no way to read a single amount. The
+figures appear once the app is open. Nothing about the money reaches the lock
+screen.
+
+The pace alert fires on the entry that tips the period past what the target
+allows, once per crossing, and its text carries no figures either.
 
 ## Requirements
 
@@ -34,8 +108,10 @@ npm run preview
 ```
 
 `npm run build` regenerates the icons, type checks with `tsc -b`, then builds
-with Vite. The service worker is produced by vite-plugin-pwa in `generateSW`
-mode with no runtime caching, because nothing is fetched at runtime.
+with Vite. The service worker in `src/sw.ts` is written by hand and bundled
+through vite-plugin-pwa in `injectManifest` mode, so no Workbox runtime ships
+to the device. It precaches the build, serves it offline and handles the daily
+wake up, and it makes no request to anything outside this origin.
 
 To build for a deployment at the domain root:
 
@@ -46,8 +122,8 @@ BASE_PATH=/ npm run build
 ## Deployment
 
 The app is a static folder. Copy `dist` to any static host that serves over
-HTTPS. HTTPS is required: WebAuthn, service workers and persistent storage all
-need a secure context.
+HTTPS. HTTPS is required: WebAuthn, service workers, background sync,
+notifications and persistent storage all need a secure context.
 
 ### GitHub Pages
 
@@ -211,12 +287,16 @@ src/lib/db.ts                all IndexedDB usage
 src/lib/vault.ts             unlock, enrolment, backoff, key rotation
 src/lib/records.ts           encrypted record repository and validation
 src/lib/backup.ts            encrypted backup, CSV, import
-src/lib/budget.ts            budget arithmetic, integers only
+src/lib/balance.ts           ledger balance and the thirty day series
+src/lib/insights.ts          period totals, category split, pace, integers only
+src/lib/recurrence.ts        due dates and what is owed since last time
+src/lib/notifications.ts     permission, background wake ups, showing one
 src/lib/money.ts             cents parsing and formatting
 src/lib/period.ts            budget periods from the month start day
 src/state/store.tsx          decrypted state, actions, auto lock
 src/views/                   one file per screen
-src/components/              keypad, dialog, progress bar, tab bar, switch
+src/components/              keypad, charts, dialog, tab bar, switch
+src/sw.ts                    the service worker, written by hand
 src/styles/index.css         every colour, spacing, radius and size token
 ```
 

@@ -4,13 +4,21 @@
  */
 import { useCallback, useEffect, useState } from "react";
 
-export const ROUTES = ["overview", "add", "transactions", "categories", "settings"] as const;
+export const ROUTES = [
+  "home",
+  "add",
+  "review",
+  "settings",
+  "transactions",
+  "categories",
+  "recurring",
+] as const;
 
 export type Route = (typeof ROUTES)[number];
 
 function parse(hash: string): Route {
   const value = hash.replace(/^#\/?/, "");
-  return (ROUTES as readonly string[]).includes(value) ? (value as Route) : "overview";
+  return (ROUTES as readonly string[]).includes(value) ? (value as Route) : "home";
 }
 
 export function useRoute(): [Route, (route: Route) => void] {

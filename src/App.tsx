@@ -4,8 +4,10 @@ import { useRoute } from "./router.ts";
 import { useStoreState } from "./state/store.tsx";
 import { AddTransactionView } from "./views/AddTransactionView.tsx";
 import { CategoriesView } from "./views/CategoriesView.tsx";
+import { HomeView } from "./views/HomeView.tsx";
 import { LockView } from "./views/LockView.tsx";
-import { OverviewView } from "./views/OverviewView.tsx";
+import { RecurringView } from "./views/RecurringView.tsx";
+import { ReviewView } from "./views/ReviewView.tsx";
 import { SetupWizard } from "./views/SetupWizard.tsx";
 import { SettingsView } from "./views/SettingsView.tsx";
 import { TransactionsView } from "./views/TransactionsView.tsx";
@@ -39,7 +41,7 @@ export function App() {
         <SetupWizard
           onDone={() => {
             setWizardOpen(false);
-            navigate("overview");
+            navigate("home");
           }}
         />
       </div>
@@ -56,11 +58,13 @@ export function App() {
 
   return (
     <div className="app">
-      {route === "overview" ? <OverviewView onNavigate={navigate} /> : null}
+      {route === "home" ? <HomeView onNavigate={navigate} /> : null}
       {route === "add" ? <AddTransactionView onNavigate={navigate} /> : null}
-      {route === "transactions" ? <TransactionsView /> : null}
-      {route === "categories" ? <CategoriesView /> : null}
-      {route === "settings" ? <SettingsView /> : null}
+      {route === "review" ? <ReviewView /> : null}
+      {route === "settings" ? <SettingsView onNavigate={navigate} /> : null}
+      {route === "transactions" ? <TransactionsView onNavigate={navigate} /> : null}
+      {route === "categories" ? <CategoriesView onNavigate={navigate} /> : null}
+      {route === "recurring" ? <RecurringView onNavigate={navigate} /> : null}
       <TabBar route={route} onNavigate={navigate} />
     </div>
   );
