@@ -191,6 +191,29 @@ to 4 are free, then the keypad locks for 5, 15, 60 and 300 seconds on each
 further failure. The optional `wipeAfterFailures` setting deletes everything
 after 10 consecutive failures.
 
+### The origin is the security boundary
+
+Everything the app stores is scoped to the origin, and so is the WebAuthn
+credential. Any page served from the same origin can open the same IndexedDB.
+
+A GitHub Pages project site at `https://<user>.github.io/budget/` shares its
+origin with every other project on that account. The records stay encrypted, so
+another page could read ciphertext and get nowhere without the PIN, with one
+exception: in biometric `gate` mode the wrapping key sits in the database in
+the clear, and a page on the same origin could read it and decrypt everything
+without ever passing a biometric check.
+
+Three ways to deal with that, in order of preference:
+
+1. Serve the app from its own origin, such as a custom domain
+   `budget.example.com`, or a dedicated GitHub account whose user site is the
+   app itself.
+2. Keep the account free of any site you do not fully control, and remember
+   that a third party script on a sibling project inherits this access.
+3. Use the PIN only and leave the biometric off, which keeps the data
+   encrypted under PBKDF2 no matter what else lives on the origin. `prf` mode
+   is also safe here, because nothing usable is stored.
+
 ### Biometric modes
 
 - `prf`: the authenticator returned a stable secret through the WebAuthn PRF

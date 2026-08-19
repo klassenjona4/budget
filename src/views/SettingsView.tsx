@@ -10,7 +10,7 @@ import type { Locale } from "../lib/types.ts";
 import type { Route } from "../router.ts";
 
 const GATE_EXPLANATION =
-  "Mode: gate. The device did not provide key material, so the encryption key is stored on this device and the biometric check is a lock on the interface rather than on the data. The protection rests on the phone lock screen. The PIN path is unaffected and remains fully encrypted.";
+  "Mode: gate. The device did not provide key material, so the encryption key is stored on this device and the biometric check is a lock on the interface rather than on the data. The protection rests on the phone lock screen. Any other page published on the same origin could read that stored key, so on a shared host the PIN alone is the stronger choice. The PIN path is unaffected and remains fully encrypted.";
 
 const PRF_EXPLANATION =
   "Mode: prf. The device provided key material, so the biometric is required to reconstruct the encryption key. The data cannot be decrypted without it.";

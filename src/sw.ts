@@ -43,8 +43,13 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
+      // A GitHub Pages project site shares its origin with every other project
+      // on the account, so only caches belonging to this scope are removed.
+      // That covers the Workbox cache left by earlier versions of the app.
+      const scope = self.registration.scope;
       for (const key of await caches.keys()) {
-        if (key !== CACHE && key.startsWith("budget-")) await caches.delete(key);
+        if (key === CACHE) continue;
+        if (key.startsWith("budget-") || key.includes(scope)) await caches.delete(key);
       }
       await self.clients.claim();
     })(),
