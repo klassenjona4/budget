@@ -117,12 +117,7 @@ export async function seedInitialData(dek: CryptoKey): Promise<VaultData> {
   const categories: Category[] = SEED_CATEGORIES.map((seed, index) =>
     buildCategory(seed.name, seed.kind, index),
   );
-  categories.push({
-    ...buildCategory(CORRECTION_CATEGORY_NAME, "variable", SEED_CATEGORIES.length),
-    colour: "#8A93B5",
-    archived: true,
-    system: "correction",
-  });
+  categories.push(buildCorrectionCategory(SEED_CATEGORIES.length));
   const settings: Settings = { ...DEFAULT_SETTINGS, openingBalanceDate: today() };
   await saveRecords(dek, [settings, ...categories]);
   return { categories, transactions: [], recurrences: [], settings, damaged: 0 };
@@ -135,6 +130,19 @@ export function correctionCategory(categories: Category[]): Category | null {
     categories.find((category) => category.name === CORRECTION_CATEGORY_NAME) ??
     null
   );
+}
+
+/**
+ * Builds the reserved correction category. A vault created before corrections
+ * existed has no such category, so one is made the first time it is needed.
+ */
+export function buildCorrectionCategory(sortIndex: number): Category {
+  return {
+    ...buildCategory(CORRECTION_CATEGORY_NAME, "variable", sortIndex),
+    colour: "#8A93B5",
+    archived: true,
+    system: "correction",
+  };
 }
 
 export async function replaceAll(dek: CryptoKey, records: BudgetRecord[]): Promise<void> {

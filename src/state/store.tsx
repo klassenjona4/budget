@@ -31,6 +31,7 @@ import { summariseMonth } from "../lib/insights.ts";
 import { pendingPosts, postsFor } from "../lib/recurrence.ts";
 import { currentPeriod, today } from "../lib/period.ts";
 import {
+  buildCorrectionCategory,
   correctionCategory,
   loadAll,
   removeRecord,
@@ -338,8 +339,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const todayIso = today();
       const difference = actualCents - currentBalance(current.settings, current.transactions, todayIso);
       if (difference === 0) return;
-      const category = correctionCategory(current.categories);
-      if (!category) throw new Error("The balance correction category is missing.");
+      // A vault from before corrections existed has no reserved category yet.
+      let category = correctionCategory(current.categories);
+      if (!category) {
+        category = buildCorrectionCategory(current.categories.length);
+        await saveRecord(dek(), category);
+        const created = category;
+        setData((state) => ({
+          ...state,
+          categories: sortCategories([...state.categories, created]),
+        }));
+      }
       const transaction: Transaction = {
         id: newId(),
         type: "transaction",
